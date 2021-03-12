@@ -1,9 +1,9 @@
 import pycuda.autoinit
 import pycuda.driver as drv
 import numpy as np
-
 from pycuda.compiler import SourceModule
-mmod = SourceModule("""
+
+fmod = SourceModule("""
 __global__ void multiply_them(float *dest, float *a, float *b)
 {
   const int i = threadIdx.x;
@@ -22,5 +22,5 @@ __global__ void accumulate(int *out, int *in)
 
 
 
-multiply_them = mmod.get_function("multiply_them")
+multiply_them = fmod.get_function("multiply_them")
 accumulate = mod.get_function("accumulate")

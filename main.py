@@ -1,15 +1,22 @@
 
 import pycuda.autoinit
 import pycuda.driver as cuda
+from pycuda import gpuarray
 import numpy as np
 import csv
 from pycuda.compiler import SourceModule
-from cudaFunctions import multiply_them
+from cudaFunctions import multiply_them, accumulate
 NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
 trainingData = 'data/train.csv'
 testData = 'data/test.csv'
 
+
+###########################################
+################KERNELS####################
+###########################################
+
+###########################################
 a = np.random.randn(400).astype(np.float32)
 b = np.random.randn(400).astype(np.float32)
 
@@ -58,29 +65,25 @@ means = np.zeros((NUM_CLASSES,len(trainSamples[0])),dtype=np.int32)
 
 #create streams
 streams = []
-inputs = []
 rets = []
 counts = [0 for _ in range(NUM_CLASSES)]
 for i in range(NUM_CLASSES):
     streams.append(cuda.Stream())
-    inputs.append(cuda.mem_alloc(trainSamples[0].nbytes))
-    rets.append(cuda.mem_alloc(trainSamples[0].nbytes))
 
 
-#send all means over
 for i in range(NUM_CLASSES):
-    cuda.memcpy_htod_async(rets[i],means[i],stream=streams[i])
+    rets.append(gpuarray.to_gpu_async(means[i],stream=streams[i]))
 
 ## accumulate everything
 for vector,label in zip(trainSamples,trainLabels):
+    current = gpuarray.to_gpu_async(vector,stream=streams[label-1])
     counts[label-1]+=1
-    cuda.memcpy_htod_async(inputs[label-1],vector,stream=streams[label-1])
-    #temporary, set back to 32 later
-    accumulate(rets[label-1],inputs[label-1],block=(28,1,1),grid=(28,1),stream=streams[label-1])
+    accumulate(rets[label-1],current,block=(28,1,1),grid=(28,1),stream=streams[label-1])
     
 
-for i in range(NUM_CLASSSES):
-    cuda.memcpy_dtoh_async(means[i],ret[i],stream=streams[i])
+means = []
+for i in range(NUM_CLASSES):
+    means.append(rets[i].get_async(stream=streams[i]))
 
 for stream in streams:
     stream.synchronize()
@@ -100,9 +103,6 @@ print(trainSamples.shape)
 print(trainLabels.shape)
 
 #mem copy to GPU
-cuda.memcpy_htod(cudaRet,means)
-cuda.memcpy_htod(cudaLabels,trainLabels)
-cuda.memcpy_htod(cudaSamples,trainSamples)
 
 #call function here..
 #cudaMean(ret,drv.In(samples),drv.In(labels),block=(,,),grid(,))
