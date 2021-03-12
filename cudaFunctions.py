@@ -20,10 +20,10 @@ __global__ void accumulate(float *out, float *in)
 """)
 
 dmod = SourceModule("""
-__global__ void normalize(float *out, float divisor)
+__global__ void scale(float *out, float *scalar)
 {
     const int i = threadIdx.x + blockIdx.x*blockDim.x;
-    out[i] = out[i]/divisor;
+    out[i] = out[i]*scalar[0];
 } 
 """)
 
@@ -33,6 +33,7 @@ __global__ void normalize(float *out, float divisor)
 
 
 
+
 multiply_them = fmod.get_function("multiply_them")
 accumulate = amod.get_function("accumulate")
-normalize = dmod.get_function("normalize")
+scale = dmod.get_function("scale")

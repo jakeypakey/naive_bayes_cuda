@@ -5,7 +5,7 @@ import numpy as np
 import csv
 from pycuda.compiler import SourceModule
 ################KERNELS####################
-from cudaFunctions import multiply_them, accumulate, normalize
+from cudaFunctions import multiply_them, accumulate, scale
 ###########################################
 NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
@@ -33,36 +33,44 @@ def readData():
 
     return (train,test)
 
-def computeMeans(trainLabels,trainSamples):
+def computeMeans(streams,rets,vectors,scalars,trainLabels):
     #create streams, one per class is a natural way to partition
-    streams = []
-    counts = np.array([0 for _ in range(NUM_CLASSES)],dtype=np.float32)
-    for i in range(NUM_CLASSES):
-        streams.append(cuda.Stream())
-
-
-    #create means of zero, initialize, and move to GPU
-    means = np.zeros((NUM_CLASSES,len(trainSamples[0])),dtype=np.float32)
-    rets = []
-    for i in range(NUM_CLASSES):
-        rets.append(gpuarray.to_gpu_async(means[i],stream=streams[i]))
-
-    ## accumulate everything on GPU
-    for vector,label in zip(trainSamples,trainLabels):
-        current = gpuarray.to_gpu_async(vector,stream=streams[label])
-        counts[label]+=1
-        ##THIS IS 28thread warp need to CHANGE once functional
-        accumulate(rets[label],current,block=(28,1,1),grid=(28,1),stream=streams[label])
+    for i in range(len(trainLabels)):
+       accumulate(rets[trainLabels[i]],vectors[i],block=(28,1,1),grid=(28,1),stream=streams[trainLabels[i]])
 
 
     #now, normalize the output
     #synchronize streams, as this is the completion of the mean calculation
     for i in range(NUM_CLASSES):
-        normalize(rets[i],counts[i],block=(28,1,1),grid=(28,1),stream=streams[i])
-        streams[i].synchronize()
+        scale(rets[i],scalars[i],block=(28,1,1),grid=(28,1),stream=streams[i])
 
     means = []
     for i in range(NUM_CLASSES):
         means.append(rets[i].get_async(stream=streams[i]))
 
     return means     
+def sendDataToGPU(samples,labels,streams=None):
+    #create streams
+    if streams==None:
+        streams = []
+        for _ in range(NUM_CLASSES):
+            streams.append(cuda.Stream())
+
+    means = []
+    for i in range(NUM_CLASSES):
+        means.append(gpuarray.to_gpu_async(np.zeros_like(samples[0]),stream=streams[i]))
+
+    vectors = [] 
+    count = np.array([[0] for _ in range(NUM_CLASSES)],dtype=np.float32)
+    for s,l in zip(samples,labels):
+        vectors.append(gpuarray.to_gpu_async(s,stream=streams[l]))
+        count[l]+=1
+
+    scalars = []
+    for i in range(NUM_CLASSES):
+        count[i] = 1/count[i]
+        scalars.append(gpuarray.to_gpu_async(count[i],stream=streams[i]))
+    return (streams,means,vectors,scalars)
+        
+#def computeCov(streams,means,vectors,priors):
+
