@@ -11,16 +11,28 @@ __global__ void multiply_them(float *dest, float *a, float *b)
 }
 """)
 
-mod = SourceModule("""
-__global__ void accumulate(int *out, int *in)
+amod = SourceModule("""
+__global__ void accumulate(float *out, float *in)
 {
     const int i = threadIdx.x + blockIdx.x*blockDim.x;
     out[i] = out[i] + in[i];
 } 
 """)
 
+dmod = SourceModule("""
+__global__ void normalize(float *out, float divisor)
+{
+    const int i = threadIdx.x + blockIdx.x*blockDim.x;
+    out[i] = out[i]/divisor;
+} 
+""")
+
+
+
+
 
 
 
 multiply_them = fmod.get_function("multiply_them")
-accumulate = mod.get_function("accumulate")
+accumulate = amod.get_function("accumulate")
+normalize = dmod.get_function("normalize")
