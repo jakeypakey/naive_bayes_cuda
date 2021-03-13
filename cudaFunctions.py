@@ -27,6 +27,27 @@ __global__ void scale(float *out, float *scalar)
 } 
 """)
 
+smod = SourceModule("""
+__global__ void subtract(float *out, float *sub)
+{
+    const int i = threadIdx.x + blockIdx.x*blockDim.x;
+    out[i] = out[i] - sub[i];
+} 
+""")
+
+cmod = SourceModule("""
+__global__ void accumulateCovs(float *cov, float *in)
+{
+    const int i = threadIdx.x;
+    const int j = blockIdx.x;
+
+    cov[i+j*blockDim.x] = cov[i+j*blockDim.x] + in[i]*in[j];
+    if(i==j)
+        cov[i+j*blockDim.x] = 1;
+
+        
+} 
+""")
 
 
 
@@ -37,3 +58,5 @@ __global__ void scale(float *out, float *scalar)
 multiply_them = fmod.get_function("multiply_them")
 accumulate = amod.get_function("accumulate")
 scale = dmod.get_function("scale")
+subtract = smod.get_function("subtract")
+accumulateCovs = cmod.get_function("accumulateCovs")
