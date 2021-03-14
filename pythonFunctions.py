@@ -8,12 +8,15 @@ from pycuda.compiler import SourceModule
 from cudaFunctions import multiply_them, accumulate, scale, subtract, \
      accumulateCovs
 ###########################################
-NUM_CLASSES = 10
+NUM_CLASSES = 1
 WARPS_PER_BLOCK=4
-SAMPLE_BLOCK = (28,1,1)
-SAMPLE_GRID = (28,1)
-COV_BLOCK = (784,1,1)
-COV_GRID = (784,1)
+#SAMPLE_BLOCK = (28,1,1)
+#SAMPLE_GRID = (28,1)
+SAMPLE_BLOCK = (2,1,1)
+SAMPLE_GRID = (1,1)
+VECTOR_LEN = 2
+COV_BLOCK = (VECTOR_LEN,1,1)
+COV_GRID = (VECTOR_LEN,1)
 trainingData = 'data/train.csv'
 testData = 'data/test.csv'
 
@@ -38,23 +41,26 @@ def checkMeans(cudaMeans,trainSamples,trainLabels,streams):
     if not correct:
         print("ERROR - MEANS")
 
-def checkCovs(samples,labels,cudaCovs,streams):
-
+def checkCovs(samples,labels,cudaCovs,scalars,streams):
     correct = True
     covs = []
+    scals = []
     for i in range(NUM_CLASSES):
         covs.append(cudaCovs[i].get_async(stream=streams[i]))
+        scals.append(scalars[i].get_async(stream=streams[i]))
     data = [ [] for _ in range(NUM_CLASSES)]
     for label,sample in zip(labels,samples):
         data[label].append(sample)
-    npCovs = []
+    pyCovs = []
     for i in range(NUM_CLASSES):
-        npCovs.append(np.cov(np.transpose(data[i])))
+        pyCovs.append(np.cov(np.transpose(data[i])))
 
-    for c,m in zip(covs,npCovs):
+    for c,m in zip(covs,pyCovs):
+        print('here mine:')
         print(c)
-        if(np.linalg.norm(m-c) > .001):
-            print(np.linalg.norm(m-c))
+        print('here theirs:')
+        print(m)
+        if(np.linalg.norm(m-c) > .00001):
             correct = False
     if not correct:
         print("ERROR - COVS")
@@ -117,7 +123,7 @@ def sendDataToGPU(samples,labels,streams=None):
         scalars.append(gpuarray.to_gpu_async(count[i],stream=streams[i]))
     return (streams,means,vectors,scalars)
         
-def InitCovsGPU(streams=None,dim=784):
+def InitCovsGPU(streams=None,dim=VECTOR_LEN):
     assert not streams==None
     
     cudaCovs = []
@@ -132,10 +138,10 @@ def computeCov(streams,covs,means,vectors,labels,scalars):
     for i in range(len(labels)):
         subtract(vectors[i],means[labels[i]],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[labels[i]])
 
-
     for i in range(len(labels)):
         accumulateCovs(covs[labels[i]],vectors[i],block=COV_BLOCK,grid=COV_GRID,stream=streams[labels[i]])
 
+    """
     checks = []
     for i in range(NUM_CLASSES):
         checks.append(covs[i].get_async(stream=streams[i]))
@@ -143,12 +149,10 @@ def computeCov(streams,covs,means,vectors,labels,scalars):
         for j in range(784):
             print(checks[i][j][j])
         print('next cov now')
+    """
 
-    
-"""
     for i in range(NUM_CLASSES):
         scale(covs[labels[i]],scalars[i],block=COV_BLOCK,grid=COV_GRID,stream=streams[i])
 
     return covs
-        """
 
