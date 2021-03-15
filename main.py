@@ -1,25 +1,21 @@
 import numpy as np
-NUM_CLASSES = 1
+NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
-from pythonFunctions import readData, computeMeans, sendDataToGPU, computeCov, \
-     checkMeans, InitCovsGPU, checkCovs
+from pythonFunctions import readData, computeParams, checkParams, sendDataToGPU
 
 #read and unpack data
-#train,test = readData()
-#trainLabels, trainSamples = train
-#testLabels, testSamples = test
-trainLabels = np.array([0, 0])
-trainSamples = np.array([ [0,1],[1,2] ])
+train,test = readData()
+trainLabels, trainSamples = train
+testLabels, testSamples = test
 
 
 #move data over
 streams,cudaMeans,cudaVectors,cudaScalars = sendDataToGPU(trainSamples,trainLabels)
-#calculate means
-cudaMeans = computeMeans(streams,cudaMeans,cudaVectors,cudaScalars,trainLabels)
+#calculate params
+cudaCovs, cudaMeans = computeParams(streams,cudaMeans,cudaVectors,cudaScalars,trainLabels)
+checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,streams)
 
+
+#exit()
 #calculate covarience
-cudaCovs = InitCovsGPU(streams)
-cudaCovs = computeCov(streams,cudaCovs,cudaMeans,cudaVectors,trainLabels,cudaScalars)
-
-checkCovs(trainSamples,trainLabels,cudaCovs,cudaScalars,streams)
 

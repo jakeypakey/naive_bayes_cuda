@@ -8,19 +8,20 @@ from pycuda.compiler import SourceModule
 from cudaFunctions import multiply_them, accumulate, scale, subtract, \
      accumulateCovs
 ###########################################
-NUM_CLASSES = 1
+NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
-#SAMPLE_BLOCK = (28,1,1)
-#SAMPLE_GRID = (28,1)
-SAMPLE_BLOCK = (2,1,1)
-SAMPLE_GRID = (1,1)
-VECTOR_LEN = 2
-COV_BLOCK = (VECTOR_LEN,1,1)
+SAMPLE_BLOCK = (28,1,1)
+SAMPLE_GRID = (28,1)
+#SAMPLE_BLOCK = (2,1,1)
+#SAMPLE_GRID = (1,1)
+VECTOR_LEN = 784
+#VECTOR_LEN = 2 COV_BLOCK = (VECTOR_LEN,1,1)
 COV_GRID = (VECTOR_LEN,1)
+COV_BLOCK = (VECTOR_LEN,1,1)
 trainingData = 'data/train.csv'
 testData = 'data/test.csv'
 
-def checkMeans(cudaMeans,trainSamples,trainLabels,streams):
+def checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,streams):
     npMeans = np.zeros((NUM_CLASSES,len(trainSamples[0])),dtype=np.float32)
     counts = np.array([0 for _ in range(NUM_CLASSES)],dtype=np.float32)
     #calclate means here
@@ -29,41 +30,58 @@ def checkMeans(cudaMeans,trainSamples,trainLabels,streams):
         counts[l]+=1
     for i in range(NUM_CLASSES):
         npMeans[i] /= counts[i]
-
     correct = True
     means = []
     for i in range(NUM_CLASSES):
         means.append(cudaMeans[i].get_async(stream=streams[i]))
     for c,m in zip(means,npMeans):
-        if(np.linalg.norm(m-c) > .001):
+        if(np.linalg.norm(m-c)/np.linalg.norm(m) > .001):
+            print('mean err')
             correct = False
-        
     if not correct:
         print("ERROR - MEANS")
+        return
 
-def checkCovs(samples,labels,cudaCovs,scalars,streams):
-    correct = True
+    """
+    npShift = []
+    for s,l in zip(trainSamples,trainLabels):
+        npShift.append(s - npMeans[l])
+    cudaShift = []
+    for i in range(NUM_CLASSES):
+        cudaShift.append(cudaCovs[i].get_async(stream=streams[i]))
+    print(cudaShift[0])
+    print(npShift[0])
+    for c,m in zip(cudaShift,npShift):
+        if(np.linalg.norm(m-c)> .001):
+            print("shift er")
+            correct = False
+
+    if not correct:
+        print("error shift")
+
+    """
+
+    npData = [[] for _ in range(NUM_CLASSES)]
+    for s,l in zip(trainSamples,trainLabels):
+        npData[l].append(s)
+
+    npCov = []
+    for i in range(NUM_CLASSES):
+        npCov.append(np.cov(np.transpose(npData[i])))
+
     covs = []
-    scals = []
     for i in range(NUM_CLASSES):
         covs.append(cudaCovs[i].get_async(stream=streams[i]))
-        scals.append(scalars[i].get_async(stream=streams[i]))
-    data = [ [] for _ in range(NUM_CLASSES)]
-    for label,sample in zip(labels,samples):
-        data[label].append(sample)
-    pyCovs = []
-    for i in range(NUM_CLASSES):
-        pyCovs.append(np.cov(np.transpose(data[i])))
 
-    for c,m in zip(covs,pyCovs):
-        print('here mine:')
-        print(c)
-        print('here theirs:')
-        print(m)
-        if(np.linalg.norm(m-c) > .00001):
+    for c,m in zip(covs,npCov):
+        if (np.linalg.norm(m-c)/np.linalg.norm(m) > .001):
+            print('cov er')
             correct = False
+
     if not correct:
         print("ERROR - COVS")
+
+
 
 def readData():
     with open(trainingData,'r') as fin:
@@ -87,19 +105,44 @@ def readData():
 
     return (train,test)
 
-def computeMeans(streams,rets,vectors,scalars,trainLabels):
+def computeParams(streams,rets,vectors,scalars,trainLabels):
     #create streams, one per class is a natural way to partition
     for i in range(len(trainLabels)):
        accumulate(rets[trainLabels[i]],vectors[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[trainLabels[i]])
 
-
     #now, normalize the output
-    #synchronize streams, as this is the completion of the mean calculation
-    for i in range(NUM_CLASSES):
+    for i in range(NUM_CLASSES): 
         scale(rets[i],scalars[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[i])
 
 
-    return rets     
+    #now we will shift the vectors for cov
+    for i in range(len(trainLabels)):
+        subtract(vectors[i],rets[trainLabels[i]],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[trainLabels[i]])
+
+    #allocate covs here     
+    cudaCovs = []
+    for i in range(NUM_CLASSES):
+        cudaCovs.append(gpuarray.to_gpu_async(np.zeros((VECTOR_LEN,VECTOR_LEN),dtype=np.float32),stream=streams[i]))
+
+    for i in range(len(trainLabels)):
+        accumulateCovs(cudaCovs[trainLabels[i]],vectors[i],block=COV_BLOCK,grid=COV_GRID,stream=streams[trainLabels[i]])
+    
+    for i in range(NUM_CLASSES):
+        scale(cudaCovs[i],scalars[i],block=COV_BLOCK,grid=COV_GRID,stream=streams[i])
+
+
+    return cudaCovs, rets     
+        
+def InitCovsGPU(streams=None):
+    assert not streams==None
+    
+    cudaCovs = []
+    for i in range(NUM_CLASSES):
+        cudaCovs.append(gpuarray.to_gpu_async(np.zeros((VECTOR_LEN,VECTOR_LEN),dtype=np.float32),stream=streams[i]))
+        
+    return cudaCovs
+
+
 def sendDataToGPU(samples,labels,streams=None):
     #create streams
     if streams==None:
@@ -122,37 +165,3 @@ def sendDataToGPU(samples,labels,streams=None):
         count[i] = 1/count[i]
         scalars.append(gpuarray.to_gpu_async(count[i],stream=streams[i]))
     return (streams,means,vectors,scalars)
-        
-def InitCovsGPU(streams=None,dim=VECTOR_LEN):
-    assert not streams==None
-    
-    cudaCovs = []
-    for i in range(NUM_CLASSES):
-        cudaCovs.append(gpuarray.to_gpu_async(np.zeros((dim,dim)),stream=streams[i]))
-    return cudaCovs
-
-
-def computeCov(streams,covs,means,vectors,labels,scalars):
-    #we are going to calculate each covarience serpeately
-    #first we just get shifted vectors
-    for i in range(len(labels)):
-        subtract(vectors[i],means[labels[i]],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[labels[i]])
-
-    for i in range(len(labels)):
-        accumulateCovs(covs[labels[i]],vectors[i],block=COV_BLOCK,grid=COV_GRID,stream=streams[labels[i]])
-
-    """
-    checks = []
-    for i in range(NUM_CLASSES):
-        checks.append(covs[i].get_async(stream=streams[i]))
-    for i in range(10):
-        for j in range(784):
-            print(checks[i][j][j])
-        print('next cov now')
-    """
-
-    for i in range(NUM_CLASSES):
-        scale(covs[labels[i]],scalars[i],block=COV_BLOCK,grid=COV_GRID,stream=streams[i])
-
-    return covs
-
