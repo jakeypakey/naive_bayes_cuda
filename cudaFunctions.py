@@ -1,4 +1,5 @@
-#!/usr/bin/env python import pycuda.autoinit
+#!/usr/bin/env python 
+import pycuda.autoinit
 import pycuda.driver as drv
 import numpy as np
 from pycuda.compiler import SourceModule
@@ -32,29 +33,29 @@ smod = SourceModule("""
 __global__ void subtract(float *out, float *sub)
 {
     const int i = threadIdx.x + blockIdx.x*blockDim.x;
-//   printf("index: %d,values: out[i]: %f sub[i]: %f \\n",i,out[i],sub[i]);
     out[i] = out[i] - sub[i];
 } 
 """)
 
 cmod = SourceModule("""
-//#include <stdio.h>
 __global__ void accumulateCovs(float *cov, float *in)
 {
     const int i = threadIdx.x;
     const int j = blockIdx.x;
 
-//    printf("indices: %d, %d,   values: in[i]: %f in[j]: %f \\n",i,j,in[i],in[j]);
-
     cov[i+j*blockDim.x] = cov[i+j*blockDim.x] + in[i]*in[j];
-        //cov[i+j*blockDim.x] = 1;
-
         
 } 
 """)
 
-
-
+emod = SourceModule("""
+__global__ void extractInvDiag(float *prec, float *cov)
+{
+    const int i = threadIdx.x + blockIdx.x*blockDim.x;
+    if(cov[i+i*blockDim.x] !=0)
+        prec[i] = 1.0/cov[i+i*blockDim.x];
+} 
+""")
 
 
 
@@ -64,3 +65,4 @@ accumulate = amod.get_function("accumulate")
 scale = dmod.get_function("scale")
 subtract = smod.get_function("subtract")
 accumulateCovs = cmod.get_function("accumulateCovs")
+extractInvDiag = emod.get_function("extractInvDiag")

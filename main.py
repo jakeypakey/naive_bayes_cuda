@@ -1,7 +1,7 @@
 import numpy as np
 NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
-from pythonFunctions import readData, computeParams, checkParams, sendDataToGPU
+from pythonFunctions import readData, computeParams, checkParams, sendDataToGPU, getPrecision
 
 #read and unpack data
 train,test = readData()
@@ -13,9 +13,21 @@ testLabels, testSamples = test
 streams,cudaMeans,cudaVectors,cudaScalars = sendDataToGPU(trainSamples,trainLabels)
 #calculate params
 cudaCovs, cudaMeans = computeParams(streams,cudaMeans,cudaVectors,cudaScalars,trainLabels)
-checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,streams)
+
+
+cudaPrecision = getPrecision(cudaCovs,streams)
+
+checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,cudaPrecision,streams)
+
+#streams, cudaVectorsTest = sendDataToGPU(testSamples,testLabels,streams,train=False)
+
+#for the testing purposes, we make the assumption that all covaraince matrices are diagonal.
+#first we need to convert our covariance matrices to diagonal precision matrices
+
+
+
+#results = evaluateTestData(cudaVectorsTest,streams,
 
 
 #exit()
 #calculate covarience
-

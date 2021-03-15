@@ -6,7 +6,7 @@ import csv
 from pycuda.compiler import SourceModule
 ################KERNELS####################
 from cudaFunctions import multiply_them, accumulate, scale, subtract, \
-     accumulateCovs
+     accumulateCovs, extractInvDiag
 ###########################################
 NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
@@ -21,7 +21,7 @@ COV_BLOCK = (VECTOR_LEN,1,1)
 trainingData = 'data/train.csv'
 testData = 'data/test.csv'
 
-def checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,streams):
+def checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,cudaPrecision,streams):
     npMeans = np.zeros((NUM_CLASSES,len(trainSamples[0])),dtype=np.float32)
     counts = np.array([0 for _ in range(NUM_CLASSES)],dtype=np.float32)
     #calclate means here
@@ -35,31 +35,13 @@ def checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,streams):
     for i in range(NUM_CLASSES):
         means.append(cudaMeans[i].get_async(stream=streams[i]))
     for c,m in zip(means,npMeans):
-        if(np.linalg.norm(m-c)/np.linalg.norm(m) > .001):
-            print('mean err')
+        if(np.linalg.norm(m-c)/np.linalg.norm(m) > .0001):
+            break
             correct = False
     if not correct:
         print("ERROR - MEANS")
         return
 
-    """
-    npShift = []
-    for s,l in zip(trainSamples,trainLabels):
-        npShift.append(s - npMeans[l])
-    cudaShift = []
-    for i in range(NUM_CLASSES):
-        cudaShift.append(cudaCovs[i].get_async(stream=streams[i]))
-    print(cudaShift[0])
-    print(npShift[0])
-    for c,m in zip(cudaShift,npShift):
-        if(np.linalg.norm(m-c)> .001):
-            print("shift er")
-            correct = False
-
-    if not correct:
-        print("error shift")
-
-    """
 
     npData = [[] for _ in range(NUM_CLASSES)]
     for s,l in zip(trainSamples,trainLabels):
@@ -75,11 +57,31 @@ def checkParams(cudaMeans,cudaCovs,trainSamples,trainLabels,streams):
 
     for c,m in zip(covs,npCov):
         if (np.linalg.norm(m-c)/np.linalg.norm(m) > .001):
-            print('cov er')
+            break
             correct = False
 
     if not correct:
         print("ERROR - COVS")
+
+    prec = []
+    for i in range(NUM_CLASSES):
+        prec.append(cudaPrecision[i].get_async(stream=streams[i]))
+
+    npPrec = [-1*np.ones(VECTOR_LEN,dtype=np.float32) for _ in range(NUM_CLASSES)]
+
+    for i in range(NUM_CLASSES):
+        for j in range(VECTOR_LEN):
+            if not npCov[i][j][j] == 0:
+                npPrec[i][j] = 1/npCov[i][j][j]
+
+    for c,m in zip(prec,npPrec):
+        if (np.linalg.norm(m-c)/np.linalg.norm(m) > .001):
+            break
+            correct = False
+
+    if not correct:
+        print("ERROR - PRECISION")
+
 
 
 
@@ -143,25 +145,34 @@ def InitCovsGPU(streams=None):
     return cudaCovs
 
 
-def sendDataToGPU(samples,labels,streams=None):
+def sendDataToGPU(samples,labels,streams=None,train=True):
     #create streams
     if streams==None:
         streams = []
         for _ in range(NUM_CLASSES):
             streams.append(cuda.Stream())
 
-    means = []
-    for i in range(NUM_CLASSES):
-        means.append(gpuarray.to_gpu_async(np.zeros_like(samples[0]),stream=streams[i]))
 
     vectors = [] 
     count = np.array([[0] for _ in range(NUM_CLASSES)],dtype=np.float32)
     for s,l in zip(samples,labels):
         vectors.append(gpuarray.to_gpu_async(s,stream=streams[l]))
         count[l]+=1
+    if train:
+        means = []
+        scalars = []
+        for i in range(NUM_CLASSES):
+            count[i] = 1/count[i]
+            scalars.append(gpuarray.to_gpu_async(count[i],stream=streams[i]))
+            means.append(gpuarray.to_gpu_async(np.zeros_like(samples[0]),stream=streams[i]))
+        return (streams,means,vectors,scalars)
+    else:
+        return streams,vectors
 
-    scalars = []
+def getPrecision(covs,streams):
+    gpuarray
+    precision = []
     for i in range(NUM_CLASSES):
-        count[i] = 1/count[i]
-        scalars.append(gpuarray.to_gpu_async(count[i],stream=streams[i]))
-    return (streams,means,vectors,scalars)
+        precision.append(gpuarray.to_gpu_async(-1*np.ones(VECTOR_LEN),stream=streams[i]))
+        extractInvDiag(precision[-1],covs[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[i])
+    return precision
