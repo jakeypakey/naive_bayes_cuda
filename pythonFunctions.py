@@ -12,10 +12,8 @@ NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
 SAMPLE_BLOCK = (28,1,1)
 SAMPLE_GRID = (28,1)
-#SAMPLE_BLOCK = (2,1,1)
-#SAMPLE_GRID = (1,1)
 VECTOR_LEN = 784
-#VECTOR_LEN = 2 COV_BLOCK = (VECTOR_LEN,1,1)
+NUM_TEST_EXAMPLES = 28000
 COV_GRID = (VECTOR_LEN,1)
 COV_BLOCK = (VECTOR_LEN,1,1)
 trainingData = 'data/train.csv'
@@ -176,3 +174,16 @@ def getPrecision(covs,streams):
         precision.append(gpuarray.to_gpu_async(-1*np.ones(VECTOR_LEN),stream=streams[i]))
         extractInvDiag(precision[-1],covs[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[i])
     return precision
+
+#we use the mahalonombis distance as a meaningful approximation to determine class assignment
+def makePredictions(vectors,means,precisions,streams):
+    #first we initialize an array to set the length
+    results = []
+    vecs = []
+    for i in range(NUM_CLASSES):
+        results.append(gpuarray.to_gpu_async(-1*np.ones(NUM_TEST_EXAMPLES),stream=streams[i]))
+        vecs.append(gpuarray.to_gpu_async(np.zeros(VECTOR_LEN),stream=streams[i]))
+    
+     
+    
+    
