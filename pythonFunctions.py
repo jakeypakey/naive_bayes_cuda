@@ -6,7 +6,7 @@ import csv
 from pycuda.compiler import SourceModule
 ################KERNELS####################
 from cudaFunctions import multiply_them, accumulate, scale, subtract, \
-     accumulateCovs, extractInvDiag
+     accumulateCovs, extractInvDiag, shift, square, dot, cudaMax
 ###########################################
 NUM_CLASSES = 10
 WARPS_PER_BLOCK=4
@@ -180,10 +180,29 @@ def makePredictions(vectors,means,precisions,streams):
     #first we initialize an array to set the length
     results = []
     vecs = []
+    #get all the results ready 
+    for _ in range(len(vectors)):
+        results.append(gpuarray.to_gpu_async(np.zeros(NUM_CLASSES,dtype=np.float32),stream=streams[0]))
+
     for i in range(NUM_CLASSES):
-        results.append(gpuarray.to_gpu_async(-1*np.ones(NUM_TEST_EXAMPLES),stream=streams[i]))
-        vecs.append(gpuarray.to_gpu_async(np.zeros(VECTOR_LEN),stream=streams[i]))
+        #square precision matrix values here so we only do it once
+        square(precisions[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[i])
+        vecs.append(gpuarray.to_gpu_async(np.zeros(VECTOR_LEN,dtype=np.float32),stream=streams[i]))
+
+    streams[0].synchronize()
     
-     
+    for vi in range(len(vectors)):
+        for i in range(NUM_CLASSES):
+            shift(vecs[i],vectors[vi],means[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[i])
+            square(vecs[i],block=SAMPLE_BLOCK,grid=SAMPLE_GRID,stream=streams[i])
+            dot(results[vi],precisions[i],vecs[i],np.int32(i),block=SAMPLE_BLOCK,grid=SAMPLE_BLOCK,stream=streams[i])
     
+    finalRes = []
+    for res in results:
+        finalRes.append(np.argmin(res.get_async(stream = streams[0])))
+
+    return finalRes
+
+    
+             
     

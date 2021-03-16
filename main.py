@@ -26,9 +26,11 @@ results = makePredictions(cudaVectorsTest,cudaMeans,cudaPrecisions,streams)
 #for the testing purposes, we make the assumption that all covaraince matrices are diagonal.
 #first we need to convert our covariance matrices to diagonal precision matrices
 
+errors = 0
+for actual,predict in zip(testLabels,results):
+    if actual != predict:
+        errors+=1
+print("Accuracy: {}".format((len(testLabels)-c)/len(testLabels)))
 
 
 
-
-#exit()
-#calculate covarience
